@@ -356,7 +356,7 @@ loadCircleScene(
         //
         // farthest circle is red.  Middle is green.  Closest is blue.
 
-        numCircles = 3;
+        /*numCircles = 3;
 
         position = new float[3 * numCircles];
         velocity = new float[3 * numCircles];
@@ -385,7 +385,24 @@ loadCircleScene(
         position[8] = .25f;
         color[6] = 0.f;
         color[7] = 0.f;
-        color[8] = 1.f;
+        color[8] = 1.f;*/
+
+        numCircles = 1;
+
+        position = new float[3 * numCircles];
+        velocity = new float[3 * numCircles];
+        color = new float[3 * numCircles];
+        radius = new float[numCircles];
+
+        position[0] = .75f;
+        position[1] = .75f;
+        position[2] = 0.5f;
+        radius[0] = 0.19f;
+
+        color[0] = 1.f;
+        color[1] = 0.f;
+        color[2] = 0.f;
+
 
     } else if (sceneName == CIRCLE_RGBY) {
 

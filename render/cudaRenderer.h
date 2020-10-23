@@ -27,6 +27,12 @@ private:
     float* cudaDeviceRadius;
     float* cudaDeviceImageData;
 
+    int* cudaOwnershipSpace; //The looking glass, if you will
+    int* cudaCompactOwnershipSpace; //Compacted CUDA ownership space, same dimensions as ownership space (for worst case) 
+    int* cudaCompactLengths; //
+    void determineOwnership(int space_idx, int circle_idx);
+
+    //int roundUp(int number, int multiple); //Round up given number to a multiple
 public:
 
     CudaRenderer();
@@ -45,6 +51,7 @@ public:
     void advanceAnimation();
 
     void render();
+
 
     void shadePixel(
         int circleIndex,

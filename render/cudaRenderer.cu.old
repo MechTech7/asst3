@@ -55,14 +55,6 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 // file simpler and to seperate code that should not be modified
 #include "noiseCuda.cu_inl"
 #include "lookupColor.cu_inl"
-#include "circleBoxTest.cu_inl"
-//##############RENDERING CONSTANTS##############
-const int REGION_WIDTH = 32;
-const int REGION_HEIGHT = 32;
-const int SPACE_WIDTH = 4;//16;
-const int SPACE_HEIGHT = 4;//16;
-
-const int CIRCLE_CHUNK_SIZE = 10;
 
 
 // kernelClearImageSnowflake -- (CUDA device code)
@@ -435,105 +427,6 @@ __global__ void kernelRenderCircles() {
     }
 }
 
-__global__ void kernelOwnRegion(int* ownershipSpace, int circle_chunk_index, int circleCount, float rel_top_y, float rel_top_x, int CIRCLE_CHUNK_SIZE, int REGION_WIDTH, int REGION_HEIGHT, int SPACE_WIDTH, int SPACE_HEIGHT){
-    //TODO: Debug me!
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int regionX = index % SPACE_WIDTH;
-    int regionY = index / SPACE_WIDTH;
-
-    float flHeight = static_cast<float>(cuConstRendererParams.imageHeight);
-    float flWidth = static_cast<float>(cuConstRendererParams.imageWidth);
-
-    float region_L = static_cast<float>(regionX * REGION_WIDTH)/flWidth + rel_top_x;
-    float y_sub = static_cast<float>(REGION_HEIGHT * regionY) / flHeight;
-    float region_T = rel_top_y - y_sub;
-    float region_B = region_T - static_cast<float>(REGION_HEIGHT) / flHeight;
-    float region_R = region_L + static_cast<float>(REGION_WIDTH) / flWidth;
-
-    //TODO: Move this to CPU Calculation
-    int ownershipIdx = index * CIRCLE_CHUNK_SIZE; //Index to output to in the ownership space
-    int circleSpaceIDX = CIRCLE_CHUNK_SIZE * circle_chunk_index; //Starting index in the circle space
-
-    //TODO: Make sure we don't read past the end of circlesArr if > numCircles, stop
-    
-    for (int i = 0; i < circleCount; i++){
-        int index3 = 3 * (i + circleSpaceIDX);
-        float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
-        float rad = cuConstRendererParams.radius[i];
-
-        int circIn = circleInBoxConservative(p.x, p.y, rad, region_L, region_R, region_T, region_B);
-        ownershipSpace[ownershipIdx + i] = circIn;
-        //printf("!!!!%d, ", circIn);
-    }
-}
-
-
-__global__ void compactRegionOwnership(int* ownershipSpace, int* compactOwnershipSpace){
-//Use Exclusive_sum to compute an Ownership array with indices instead of binary values (parallel for each index in the SPACE)
-
-}
-
-__global__ void renderRegion(int* ownershipSpace, int circleCount, int circle_chunk_idx, int SPACE_WIDTH, int SPACE_HEIGHT, int REGION_WIDTH, int REGION_HEIGHT, int CIRCLE_CHUNK_SIZE, int top_x, int top_y){
-//Pixel-parallel method (parallel to pixels in the REGION) to calculate
-//TODO: optimize this method and remove divergence
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int space_size = SPACE_WIDTH * REGION_WIDTH;
-    int space_x = (index % space_size);
-    int space_y = (index / space_size);
-
-    int pixel_x = space_x + top_x;
-    int pixel_y = space_y + top_y;
-    pixel_y = (cuConstRendererParams.imageHeight - 1) - pixel_y;
-
-    float invWidth = 1.0f / static_cast<float>(cuConstRendererParams.imageWidth);
-    float invHeight = 1.0f / static_cast<float>(cuConstRendererParams.imageHeight);
-
-    float fpix_x = static_cast<float>(pixel_x);
-    float fpix_y = static_cast<float>(pixel_y);
-    
-    
-    int pixelInImage = (pixel_x < cuConstRendererParams.imageWidth && pixel_y < cuConstRendererParams.imageHeight);
-    if (!pixelInImage) return;
-
-    //printf("-----------------Here!---------------------");
-    int ownershipStart = CIRCLE_CHUNK_SIZE * ((space_y / REGION_HEIGHT)*SPACE_WIDTH + (space_x / REGION_WIDTH)); //Go backwards and calculate your region index (inside space)
-    
-    int positionStart = CIRCLE_CHUNK_SIZE * circle_chunk_idx;
-
-    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_y * cuConstRendererParams.imageWidth + pixel_x)]);
-    
-    int f_val = (space_y / REGION_HEIGHT) % 2;
-    int s_val = (space_x / REGION_WIDTH) % 2;
-
-    /*if (f_val == s_val){
-        //printf("[%d] (%f, %f) [%d, %d]\n", index, fpix_y*invHeight, fpix_x*invWidth, pixel_y, pixel_x);
-        float4 newColor;
-        newColor.x = 1.0f;
-        newColor.y = 0.0f;
-        newColor.z = 0.0f;
-        newColor.w = 1.0f;
-        *imgPtr = newColor;
-    }*/
-
-
-    for (int i = 0; i < circleCount; i++){
-        float3 p = *(float3*)(&cuConstRendererParams.position[3 * (i + positionStart)]);
-
-
-        if (ownershipSpace[ownershipStart + i] == 1){
-            //printf("!Rendering! \n");
-            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_y * cuConstRendererParams.imageWidth + pixel_x)]);
-            float2 pixelCenterNorm = make_float2((fpix_x + 0.5f)*invWidth,
-                                                 (fpix_y - 0.5f)*invHeight);
-
-            //if (index == SPACE_WIDTH * SPACE_HEIGHT * REGION_HEIGHT * REGION_WIDTH - 1)
-            //    printf("----------------ENDEN: [%f, %f]\n---------------", fpix_y, fpix_x);
-            shadePixel(i + positionStart, pixelCenterNorm, p, imgPtr);
-        }
-
-    }
-}
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -632,8 +525,6 @@ CudaRenderer::setup() {
     cudaMalloc(&cudaDeviceColor, sizeof(float) * 3 * numCircles);
     cudaMalloc(&cudaDeviceRadius, sizeof(float) * numCircles);
     cudaMalloc(&cudaDeviceImageData, sizeof(float) * 4 * image->width * image->height);
-    cudaMalloc(&cudaOwnershipSpace, sizeof(int) * SPACE_HEIGHT * SPACE_WIDTH * CIRCLE_CHUNK_SIZE);
-    cudaMalloc(&cudaCompactOwnershipSpace, sizeof(int) * SPACE_HEIGHT * SPACE_WIDTH * CIRCLE_CHUNK_SIZE);
 
     cudaMemcpy(cudaDevicePosition, position, sizeof(float) * 3 * numCircles, cudaMemcpyHostToDevice);
     cudaMemcpy(cudaDeviceVelocity, velocity, sizeof(float) * 3 * numCircles, cudaMemcpyHostToDevice);
@@ -742,139 +633,13 @@ CudaRenderer::advanceAnimation() {
     cudaDeviceSynchronize();
 }
 
-//Round integer up to a given multiple
-int roundUp(int number, int multiple){
-    if (multiple == 0) return number;
-
-    int remainder = number % multiple;
-    
-    if (remainder == 0) return number;
-
-    return number + multiple - remainder;
-}
-
-void CudaRenderer::determineOwnership(int space_idx, int circ_chunk_idx){
-    //TODO: Debug Me!
-    //TODO: Move these calculations somewhere singlular
-    
-    //The dimension of the grid of region-squares needed to cover the image
-    int rgrid_w = (image->width + REGION_WIDTH - 1) / REGION_WIDTH;
-    int rgrid_h = (image->height + REGION_HEIGHT - 1) / REGION_HEIGHT;
-
-    int downsc_w = (rgrid_w + SPACE_WIDTH - 1) / SPACE_WIDTH;
-    int downsc_h = (rgrid_h + SPACE_HEIGHT - 1) / SPACE_HEIGHT;
-
-    //Box index calculations
-    //Indices for the top left corner (In the region space) +1 = one REGION over not pixels
-    int top_y = (space_idx / downsc_w) * SPACE_HEIGHT;
-    int top_x = (space_idx % downsc_w) * SPACE_WIDTH;
-
-    //Convert indices to relative coordinates, ordered to pass to circleInBoxConservative
-    float flHeight = static_cast<float>(image->height);
-    float flWidth = static_cast<float>(image->width);
-
-    float fly = static_cast<float>(top_y * REGION_HEIGHT);
-    float flx = static_cast<float>(top_x * REGION_WIDTH);
-
-    float rel_top_y = (flHeight - fly) / flHeight;
-    float rel_top_x = (flx) / flWidth;
-
-    //Indices for the bottom right
-    int bot_x = top_x + (SPACE_WIDTH - 1);
-    int bot_y = top_y + (SPACE_HEIGHT - 1);
-
-    //printf("Top (y, x): (%f, %f)\n", rel_top_y, rel_top_x);
-    //printf("Bottom (y, x): (%d, %d)\n", bot_y, bot_x);
-
-    int circ_to_end = numCircles - (circ_chunk_idx * CIRCLE_CHUNK_SIZE);
-    int circle_count = min(circ_to_end, CIRCLE_CHUNK_SIZE);
-
-    
-    //printf("Circle count: %d\n", circle_count);
-
-    for (int i = 0; i < SPACE_WIDTH * SPACE_HEIGHT; i++){
-        int regionX = i % SPACE_WIDTH;
-        int regionY = i / SPACE_WIDTH;
-
-        float region_L = static_cast<float>(regionX * REGION_WIDTH)/flWidth + rel_top_x;
-        float y_sub = static_cast<float>(REGION_HEIGHT * regionY) / flHeight;
-        float region_T = rel_top_y - y_sub;
-        float region_B = region_T - static_cast<float>(REGION_HEIGHT) / flHeight;
-        float region_R = region_L + static_cast<float>(REGION_WIDTH) / flWidth;
-
-        
-        //printf("Box vars: (L: %f, R: %f, T: %f, B: %f)\n", region_L, region_R, region_T, region_B);
-    }
-
-    kernelOwnRegion<<<1, SPACE_WIDTH * SPACE_HEIGHT>>>(cudaOwnershipSpace, circ_chunk_idx, circle_count, rel_top_y, rel_top_x, CIRCLE_CHUNK_SIZE, REGION_WIDTH, REGION_HEIGHT, SPACE_WIDTH, SPACE_HEIGHT);
-
-    dim3 blockDim(256, 1);
-    dim3 gridDim((SPACE_WIDTH * SPACE_HEIGHT * REGION_HEIGHT * REGION_WIDTH + blockDim.x - 1) / blockDim.x);
-
-    int pix_top_x = top_x * REGION_WIDTH;
-    int pix_top_y = top_y * REGION_HEIGHT;
-
-    //printf ("Pix top (y, x): (%d, %d)\n", pix_top_x, pix_top_y);
-    int space_size = SPACE_WIDTH * REGION_WIDTH;
-    for (int index = 0; index < SPACE_WIDTH * SPACE_HEIGHT * REGION_HEIGHT * REGION_WIDTH; index++){    
-        int space_x = (index % space_size);
-        int space_y = (index / space_size);
-
-        int pixel_x = space_x + pix_top_x;
-        int pixel_y = space_y + pix_top_y;
-
-        float rel_pix_x = static_cast<float>(pixel_x) / static_cast<float>(image->width);
-        float rel_pix_y = static_cast<float>(image->height - pixel_y) / static_cast<float>(image->height);
-        
-        int pixelInImage = (pixel_x < image->width && pixel_y < image->height);
-        int ownershipStart = /*CIRCLE_CHUNK_SIZE */ ((space_y / REGION_HEIGHT)*SPACE_WIDTH + (space_x / REGION_WIDTH)); //Go backwards and calculate your region index (inside space)
-
-        
-        
-        if (!pixelInImage) continue;
-
-        //printf("[%d] pixel (y, x): (%d, %d) [%f, %f]\n", index, pixel_y, pixel_x, rel_pix_y, rel_pix_x);
-        //printf("ownership_idx: %d\n", ownershipStart);
-    }
-    //renderRegion(int* ownershipSpace, int circleCount, int circle_chunk_idx, int SPACE_WIDTH, int SPACE_HEIGHT, int REGION_WIDTH, int REGION_HEIGHT, int CIRCLE_CHUNK_SIZE, int top_x, int top_y)
-    //printf("Circ chunk: %d\n", circ_chunk_idx);
-    renderRegion<<<gridDim, blockDim>>>(cudaOwnershipSpace, circle_count, circ_chunk_idx, SPACE_WIDTH, SPACE_HEIGHT, REGION_WIDTH, REGION_HEIGHT, CIRCLE_CHUNK_SIZE, pix_top_x, pix_top_y);
-    
-}
-
 void
 CudaRenderer::render() {
+
     // 256 threads per block is a healthy number
     dim3 blockDim(256, 1);
     dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
 
-    //kernelRenderCircles<<<gridDim, blockDim>>>();
-
-    //"Pads" the input so that the window can mathematically "fit" into the rendered image
-    int pad_width = roundUp(image->width, SPACE_WIDTH * REGION_WIDTH);
-    int pad_height = roundUp(image->height, SPACE_HEIGHT * REGION_HEIGHT);
-
-    int pixels_left = pad_height * pad_width;//image->width * image->height;
-    int space_area = REGION_WIDTH * REGION_HEIGHT * SPACE_WIDTH * SPACE_HEIGHT; //Number of pixels covered by one window pass
-    int space_idx = 0;
-
-    //printf("Space area: %d\n", space_area);
-
-
-    while (pixels_left > 0){
-        int circles_left = numCircles;
-        int circ_chunk_idx = 0;
-
-        while (circles_left > 0){
-            determineOwnership(space_idx, circ_chunk_idx);
-            circ_chunk_idx += 1;
-            circles_left -= CIRCLE_CHUNK_SIZE;
-        }
-
-        //printf("Pixels left: %d\n", pixels_left);
-        
-        space_idx += 1;
-        pixels_left -= space_area;
-    }
+    kernelRenderCircles<<<gridDim, blockDim>>>();
     cudaDeviceSynchronize();
 }

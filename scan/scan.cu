@@ -27,25 +27,6 @@ static inline int nextPow2(int n) {
     return n;
 }
 
-__global__ void
-CUDA_upsweep_kernel(int* device_result, int N, int two_dplus, int two_d){
-    int thread_idx = blockIdx.x*blockDim.x + threadIdx.x;
-    int idx = thread_idx * two_dplus;
-    if (idx < N){
-        device_result[idx+two_dplus-1] += device_result[idx+two_d-1];
-    }
-}
-
-__global__ void
-CUDA_downsweep_kernel(int* device_result, int N, int two_dplus, int two_d){
-    int thread_idx = blockIdx.x*blockDim.x + threadIdx.x;
-    int idx = thread_idx * two_dplus;
-    if (idx < N){
-        int t = device_result[idx+two_d-1];
-        device_result[idx+two_d-1] = device_result[idx+two_dplus-1];
-        device_result[idx+two_dplus-1] += t;
-    }
-}
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -61,21 +42,11 @@ CUDA_downsweep_kernel(int* device_result, int N, int two_dplus, int two_d){
 // Also, as per the comments in cudaScan(), you can implement an
 // "in-place" scan, since the timing harness makes a copy of input and
 // places it in result
-
-void thread_block_choice(int count, int* numBlocks, int* threadsPer){
-    if (count > *threadsPer){
-        *numBlocks = (count + *threadsPer - 1) / *threadsPer;
-    }
-    else{
-        *numBlocks = 1;
-        *threadsPer = count;
-    }
-}
-
 void exclusive_scan(int* input, int N, int* result)
 {
 
     // CS149 TODO:
+    //
     // Implement your exclusive scan implementation here.  Keep input
     // mind that although the arguments to this function are device
     // allocated arrays, this is a function that is running in a thread
@@ -83,35 +54,7 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
 
-    //TODO: Set these values for NVIDIA K80
-    int threadsPerBlock = 64;
-    int numBlocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-
-    for (int two_d = 1; two_d <= N/2; two_d*=2){
-        int two_dplus = 2 * two_d;
-
-        int count = N / two_dplus;
-
-        threadsPerBlock = 64;
-        thread_block_choice(count, &numBlocks, &threadsPerBlock);
-        
-        CUDA_upsweep_kernel<<<numBlocks, threadsPerBlock>>>(result, N, two_dplus, two_d);
-    }
-    int cap = 0;
-    cudaMemcpy(result+(N-1), &cap, sizeof(int), cudaMemcpyHostToDevice);
-    //TODO: Find a faster way to do this (ask about it in OH)
-
-    for (int two_d = N/2; two_d >= 1; two_d /= 2){
-        int two_dplus = 2 * two_d;
-
-        int count = N / two_dplus;
-        
-        threadsPerBlock = 64;
-        thread_block_choice(count, &numBlocks, &threadsPerBlock);
-
-        CUDA_downsweep_kernel<<<numBlocks, threadsPerBlock>>>(result, N, two_dplus, two_d);
-    }
 }
 
 
@@ -197,31 +140,6 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration; 
 }
 
-__global__ void map_bool(int *device_input, int *device_result, int N){
-    int thread_idx = blockIdx.x*blockDim.x + threadIdx.x;
-    //TODO: Change this to improve utilization
-    if (thread_idx < (N-1))
-        device_result[thread_idx] = (device_input[thread_idx] == device_input[thread_idx + 1]);
-} 
-
-__global__ void map_to_result(int *device_input, int *device_bool_arr, int *device_result, int N){
-    int thread_idx = blockIdx.x*blockDim.x + threadIdx.x;
-
-    //TODO: Fix this divergence
-    if (thread_idx < N && device_bool_arr[thread_idx] == 1){
-        int result_idx = device_input[thread_idx];
-        device_result[result_idx] = thread_idx;
-    }
-        
-}
-/*    int host_mask[length]; //= (int*)malloc(length*sizeof(int));
-
-    cudaMemcpy(host_mask, prefix_sum, length*sizeof(int), cudaMemcpyDeviceToHost);
-
-    for (int i = 0; i < length; i++){
-        printf("%d, ", host_mask[i]);
-    }
-    printf("\n");*/
 
 // find_repeats --
 //
@@ -243,34 +161,7 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
 
-    int* bool_mask = nullptr;
-    int* prefix_sum = nullptr;
-
-    cudaMalloc(&bool_mask, sizeof(int)*length);
-    cudaMalloc(&prefix_sum, sizeof(int)*length);
-
-    cudaMemset(bool_mask, 0, sizeof(int)*length);
-    int threadsPerBlock = 32;
-    int numBlocks = 1;
-
-    if(length > threadsPerBlock){
-        numBlocks = (length + threadsPerBlock - 1) / threadsPerBlock;
-    }
-
-    map_bool<<<numBlocks, threadsPerBlock>>>(device_input, bool_mask, length);
-    cudaMemcpy(prefix_sum, bool_mask, sizeof(int)*length, cudaMemcpyDeviceToDevice);
-
-    exclusive_scan(bool_mask, length, prefix_sum);
-    map_to_result<<<numBlocks, threadsPerBlock>>>(prefix_sum, bool_mask, device_output, length);
-
-    int last_bin;
-    int last_count;
-    cudaMemcpy(&last_bin, bool_mask + (length - 1), sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&last_count, prefix_sum + (length - 1), sizeof(int), cudaMemcpyDeviceToHost);
-
-    if (last_bin)
-        last_count += 1;
-    return last_count;
+    return 0; 
 }
 
 
