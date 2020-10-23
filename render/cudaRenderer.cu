@@ -57,8 +57,8 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "lookupColor.cu_inl"
 #include "circleBoxTest.cu_inl"
 //##############RENDERING CONSTANTS##############
-const int REGION_WIDTH = 32;
-const int REGION_HEIGHT = 32;
+const int REGION_WIDTH = 128;
+const int REGION_HEIGHT = 128;
 const int SPACE_WIDTH = 4;//16;
 const int SPACE_HEIGHT = 4;//16;
 
